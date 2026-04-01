@@ -121,32 +121,55 @@ def calculate_coverage(
     }
 
 
+
+def _hit_at_k(golden: str, chunks: List[Dict], k: int, threshold: float) -> float:
+    topk = chunks[:k]
+    cov = calculate_coverage(golden, topk, threshold=threshold)
+    return 1.0 if cov['best_match_similarity'] >= threshold else 0.0
+
+
 def evaluate_data(data: List[Dict], threshold: float = 0.3) -> List[Dict]:
     results = []
 
     for idx, item in enumerate(tqdm(data, desc="评估中")):
         try:
-            coverage = calculate_coverage(
+            retrieved_chunks = item['retrieved_chunks']
+
+            # 调试：打印前5条的详细信息
+            # if idx < 5:
+            #     print(f"\n[DEBUG idx={idx}] {item['query'][:30]}")
+            #     print(f"  总chunk数: {len(retrieved_chunks)}")
+            #     for i, c in enumerate(retrieved_chunks):
+            #         sim = jaccard_similarity(item['golden_chunk'], c['text'])
+            #         print(f"  chunk[{i}] sim={sim:.3f} | {c['text'][:50]}")
+
+            full_coverage = calculate_coverage(
                 item['golden_chunk'],
-                item['retrieved_chunks'],
+                retrieved_chunks,
                 threshold=threshold,
             )
 
-            hit = 1 if coverage['coverage_ratio'] >= threshold else 0
-            top_k = len(item['retrieved_chunks'])
+            recall_at_1  = _hit_at_k(item['golden_chunk'], retrieved_chunks, 1,  threshold)
+            recall_at_3  = _hit_at_k(item['golden_chunk'], retrieved_chunks, 3,  threshold)
+            recall_at_5  = _hit_at_k(item['golden_chunk'], retrieved_chunks, 5,  threshold)
+            recall_at_10 = _hit_at_k(item['golden_chunk'], retrieved_chunks, 10, threshold)
+
+            if idx < 5:
+                print(f"  full best_sim={full_coverage['best_match_similarity']:.3f}")
+                print(f"  recall@1={recall_at_1} @3={recall_at_3} @5={recall_at_5} @10={recall_at_10}")
 
             results.append({
                 'query_id': idx,
                 'query': item['query'],
-                'retrieved_count': top_k,
-                'coverage_ratio': coverage['coverage_ratio'],
-                'sentence_coverage': coverage['sentence_coverage'],
-                'word_coverage': coverage['word_coverage'],
-                'hit_at_k': hit,
-                'recall_at_1': 1.0 if coverage['coverage_ratio'] >= threshold else 0.0,
-                'recall_at_3': hit if top_k >= 3 else coverage['coverage_ratio'],
-                'recall_at_5': hit if top_k >= 5 else coverage['coverage_ratio'],
-                'recall_at_10': hit if top_k >= 10 else coverage['coverage_ratio'],
+                'retrieved_count': len(retrieved_chunks),
+                'coverage_ratio': full_coverage['coverage_ratio'],
+                'sentence_coverage': full_coverage['sentence_coverage'],
+                'word_coverage': full_coverage['word_coverage'],
+                'best_match_similarity': full_coverage['best_match_similarity'],
+                'recall_at_1':  recall_at_1,
+                'recall_at_3':  recall_at_3,
+                'recall_at_5':  recall_at_5,
+                'recall_at_10': recall_at_10,
             })
 
         except Exception as e:
@@ -160,7 +183,7 @@ def evaluate_data(data: List[Dict], threshold: float = 0.3) -> List[Dict]:
     return results
 
 
-def calculate_metrics(results: List[Dict], top_k: int) -> Dict:
+def calculate_metrics(results: List[Dict]) -> Dict:
     valid = [r for r in results if 'error' not in r]
     if not valid:
         return {'error': '没有有效的评估结果'}
@@ -169,14 +192,12 @@ def calculate_metrics(results: List[Dict], top_k: int) -> Dict:
 
     return {
         'sample_count': len(valid),
-        'top_k': top_k,
         'coverage': {
             'mean': float(np.mean(coverages)),
             'median': float(np.median(coverages)),
             'std': float(np.std(coverages)),
         },
         'recall': {
-            'hit_at_k': float(np.mean([r['hit_at_k'] for r in valid])),
             'recall_at_1': float(np.mean([r['recall_at_1'] for r in valid])),
             'recall_at_3': float(np.mean([r['recall_at_3'] for r in valid])),
             'recall_at_5': float(np.mean([r['recall_at_5'] for r in valid])),
@@ -214,7 +235,7 @@ def main():
 
     print(f"\n开始评估 (平均Top-K={avg_top_k}, 策略=jaccard, 阈值={args.threshold})...")
     results = evaluate_data(data, threshold=args.threshold)
-    metrics = calculate_metrics(results, avg_top_k)
+    metrics = calculate_metrics(results)
 
     print("\n" + "=" * 60)
     print("评估结果摘要")
@@ -229,7 +250,6 @@ def main():
 
     print(f"\n召回指标:")
     r = metrics['recall']
-    print(f"  Hit@{avg_top_k}:    {r['hit_at_k']:.3f}")
     print(f"  Recall@1:   {r['recall_at_1']:.3f}")
     print(f"  Recall@3:   {r['recall_at_3']:.3f}")
     print(f"  Recall@5:   {r['recall_at_5']:.3f}")
@@ -239,7 +259,14 @@ def main():
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump({'metrics': metrics, 'results': results}, f, ensure_ascii=False, indent=2)
     print(f"\n结果已保存到: {out_path}")
-
+    valid = [r for r in results if 'error' not in r]
+    print("\n=== 覆盖度分布 ===")
+    for r in valid[:10]:
+        print(f"query: {r['query'][:30]}")
+        print(f"  best_match_similarity: {r['best_match_similarity']:.3f}")
+        print(f"  word_coverage:         {r['word_coverage']:.3f}")  
+        print(f"  sentence_coverage:     {r['sentence_coverage']:.3f}")
+        print(f"  coverage_ratio:        {r['coverage_ratio']:.3f}")
     # 注意：下面的代码依赖外部模块 formatters，请确保该文件存在
     import sys
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 输出格式化工具
 支持 CSV、JSON、HTML 可视化报告

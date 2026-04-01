@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-NO_PROXY_IPS = os.getenv("NO_PROXY_IPS", "10.246.99.82,localhost,127.0.0.1")
+NO_PROXY_IPS = os.getenv("NO_PROXY_IPS","10.246.99.82,localhost,127.0.0.1")
 os.environ["no_proxy"] = NO_PROXY_IPS
 os.environ["NO_PROXY"] = NO_PROXY_IPS
 
